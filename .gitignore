@@ -1,0 +1,17 @@
+frontend/node_modules/
+frontend/dist/
+backend/.venv/
+backend/__pycache__/
+server/target/
+server/music-library.mv.db
+server/music-library.trace.db
+run-logs/
+backend/python.log
+server/spring.log
+frontend/vite.log
+.DS_Store
+.env
+.env.*
+!.env.example
+*.mp3
+*.wav
