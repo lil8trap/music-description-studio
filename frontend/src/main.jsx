@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Activity, AudioLines, BarChart3, Brain, Clock3, FileAudio, Info, Music2, Play, RotateCcw, Sparkles, UploadCloud, Zap} from 'lucide-react';
+import {Activity, AudioLines, BarChart3, Brain, Clock3, FileAudio, Info, Music2, Play, RotateCcw, Search, Sparkles, UploadCloud, Zap} from 'lucide-react';
+import {filterSavedTracks} from './libraryFilters.js';
 import './style.css';
 
 const labels = ["Energetic", "Euphoric", "Dreamy", "Aggressive", "Chaotic", "Melancholic", "Peaceful", "Tense", "Mysterious", "Playful"];
@@ -16,6 +17,8 @@ function App() {
   const [file,setFile] = useState(null), [url,setUrl] = useState(''), [result,setResult] = useState(null), [mood,setMood] = useState(null), [moodError,setMoodError] = useState(''), [moodLoading,setMoodLoading] = useState(false), [error,setError] = useState(''), [loading,setLoading] = useState(false), [tab,setTab] = useState('Waveform'), [timeline,setTimeline] = useState(null), [timelineLoading,setTimelineLoading] = useState(false), [timelineError,setTimelineError] = useState('');
   const [tapTimes,setTapTimes] = useState([]);
   const [savedTracks,setSavedTracks] = useState([]), [libraryError,setLibraryError] = useState('');
+  const [librarySearch,setLibrarySearch] = useState(''), [minBpm,setMinBpm] = useState(''), [maxBpm,setMaxBpm] = useState('');
+  const [descriptionFilter,setDescriptionFilter] = useState(''), [favoritesOnly,setFavoritesOnly] = useState(false);
   const [activeId,setActiveId] = useState(null), [draftNotes,setDraftNotes] = useState('');
   const [manualBpm,setManualBpm] = useState(''), [favorite,setFavorite] = useState(false);
   const fileInput = useRef(null);
@@ -149,6 +152,14 @@ function App() {
       await loadLibrary();
     }catch(e){setLibraryError(e.message)}
   }
+  const filtersActive = Boolean(librarySearch || minBpm || maxBpm || descriptionFilter || favoritesOnly);
+  const invalidBpmRange = minBpm !== '' && maxBpm !== '' && Number(minBpm) > Number(maxBpm);
+  const visibleTracks = invalidBpmRange ? [] : filterSavedTracks(savedTracks, {
+    search: librarySearch, minBpm, maxBpm, description: descriptionFilter, favoritesOnly,
+  });
+  function clearLibraryFilters() {
+    setLibrarySearch('');setMinBpm('');setMaxBpm('');setDescriptionFilter('');setFavoritesOnly(false);
+  }
   const metrics = [
     {icon:'♫',name:'Detected musical pulse (BPM)',value:result?.tempo??'--',color:'blue'},
     {icon:'〰',name:'Energy (RMS)',value:result?.energy??'--',color:'pink'},
@@ -200,6 +211,14 @@ function App() {
     </section>
     <section className="panel library-panel">
       <div className="timeline-head"><div><h2><Music2/> Saved Listening Library</h2><p>Keep analysis results, your own tempo correction, and listening notes between sessions.</p></div><button className="secondary" onClick={loadLibrary}>Refresh Library</button></div>
+      <div className="library-filters" role="search" aria-label="Filter saved tracks">
+        <label className="library-search"><span><Search size={15}/> Search tracks</span><input type="search" value={librarySearch} onChange={e=>setLibrarySearch(e.target.value)} placeholder="Filename, description, or notes"/></label>
+        <label>Min BPM<input type="number" min="30" max="300" step="0.1" inputMode="decimal" value={minBpm} onChange={e=>setMinBpm(e.target.value)} placeholder="e.g. 80"/></label>
+        <label>Max BPM<input type="number" min="30" max="300" step="0.1" inputMode="decimal" value={maxBpm} onChange={e=>setMaxBpm(e.target.value)} placeholder="e.g. 110"/></label>
+        <label className="description-filter">Top description<select value={descriptionFilter} onChange={e=>setDescriptionFilter(e.target.value)}><option value="">All descriptions</option>{labels.map(label=><option key={label} value={label}>{label}</option>)}</select></label>
+        <label className="favorites-filter"><input type="checkbox" checked={favoritesOnly} onChange={e=>setFavoritesOnly(e.target.checked)}/> Favorites only</label>
+      </div>
+      <div className="library-filter-status"><span role="status">{visibleTracks.length} of {savedTracks.length} saved results</span><button type="button" className="clear-filters" disabled={!filtersActive} onClick={clearLibraryFilters}>Clear filters</button></div>
       {activeId&&<div className="review-card">
         <div><strong>Review this track</strong><p>Automatic BPM: {result?.tempo??'—'} · Manual correction: {manualBpm||'—'}</p></div>
         <label>Your BPM correction <input type="number" min="30" max="300" step="0.1" value={manualBpm} onChange={e=>setManualBpm(e.target.value)} placeholder="Optional BPM"/></label>
@@ -208,12 +227,13 @@ function App() {
         <div className="review-actions"><button className="primary" onClick={saveNotesAndTempo}>Save Notes & BPM</button><button className="secondary" onClick={()=>saveReview({favorite:!favorite})}>{favorite?'★ Favorited':'☆ Add Favorite'}</button></div>
       </div>}
       {libraryError&&<p className="error" role="alert">{libraryError}</p>}
-      <div className="saved-grid">{savedTracks.map(track=><article className="saved-track" key={track.id}>
+      <div className="saved-grid">{visibleTracks.map(track=><article className="saved-track" key={track.id}>
         <div className="saved-title"><strong>{track.favorite?'★ ':''}{track.filename}</strong><small>{new Date(track.analyzedAt).toLocaleDateString()}</small></div>
         <p>{track.correctedBpm??track.tempo??'—'} BPM {track.correctedBpm!=null?'(your correction)':''} · {track.duration??'—'}s {track.description?`· ${track.description}`:''}</p>
         {track.notes&&<p className="saved-note">{track.notes}</p>}
         <button className="delete-track" onClick={()=>removeSavedTrack(track.id)}>Delete saved result</button>
       </article>)}</div>
+      {savedTracks.length>0&&filtersActive&&!libraryError&&<p className="library-filter-hint">{invalidBpmRange?'Minimum BPM must be less than or equal to maximum BPM.':visibleTracks.length===0?'No matches. Try a different description or BPM range.':'BPM uses your correction when one is saved. Description filters use the top saved match.'}</p>}
       {!savedTracks.length&&!libraryError&&<p className="timeline-empty">Upload a song to save your first analysis. Audio files themselves are not stored.</p>}
     </section>
     <footer>Experimental music description matching and audio features · Streaming integrations are not implemented.</footer>

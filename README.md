@@ -10,6 +10,7 @@ This is an **educational, local-first project**. It does not integrate with Spot
 - Estimates tempo, energy, brightness, and zero-crossing rate from audio. Tap tempo and half/double-time comparisons help interpret uncertain BPM estimates.
 - Uses a pretrained CLAP model to rank ten music descriptions and sample eight sections across a song. These are relative matches, not calibrated probabilities.
 - Saves analysis summaries, notes, favorites, and corrected BPM in a local H2 database. Uploaded songs are deleted from temporary storage after processing.
+- Searches saved results by filename, description, or notes; filters by BPM range, top description, and favorites. BPM filtering uses a saved correction when available. Filters apply instantly to summaries already loaded in the browser.
 
 ## Architecture
 
@@ -81,6 +82,8 @@ npm ci
 npm run dev
 ```
 
+To run the saved-library filter checks, run `npm test` from `frontend`.
+
 Open <http://127.0.0.1:5173>. The Java service listens on 127.0.0.1:8080. Set `ANALYZER_URL` before starting Java if Python uses a different address. Set `VITE_API_BASE` for the frontend if Java uses a different address.
 
 For later manual runs, you do not need to reinstall dependencies. In three separate terminals,
@@ -113,7 +116,7 @@ If the upload fails, the response includes the Python analyzer's error details. 
 2. `TrackController` maps that request to `TrackService`. The service checks the file and calls `AnalyzerClient`.
 3. `AnalyzerClient` streams the validated audio to Python `/api/analyze-raw`, with the file extension in an HTTP header.
 4. Python calculates the features and waveform. Java saves only the summary through `TrackRepository`, which is a Spring Data JPA repository backed by H2.
-5. The library screen uses `GET /api/tracks` and `PATCH /api/tracks/{id}` to show history and save your notes, favorite, or corrected BPM.
+5. The library screen uses `GET /api/tracks` and `PATCH /api/tracks/{id}` to show history and save your notes, favorite, or corrected BPM. It searches the fetched summaries by text, BPM range, top description, and favorites.
 
 ## Verification and current limits
 
