@@ -1,126 +1,94 @@
 # Music Description Studio
 
-A local full-stack music analysis app built with React, Spring Boot, and Python. Upload an MP3 or WAV to see its waveform, estimated BPM, audio features, and experimental music descriptions. Save listening notes, tempo corrections, and favorites between sessions.
-
-This is an **educational, local-first project**. It does not integrate with Spotify or Apple Music, store uploaded audio, or authenticate multiple users.
+A local music analysis app built with React, Spring Boot, and Python. Upload an MP3 or WAV to play it through a seekable full-song waveform, estimate tempo and audio features, and automatically rank experimental music feelings. Save listening notes, BPM corrections, favorites, and analysis summaries between sessions.
 
 ## What it does
 
-- Plays MP3/WAV uploads and draws a full-song peak waveform.
-- Estimates tempo, energy, brightness, and zero-crossing rate from audio. Tap tempo and half/double-time comparisons help interpret uncertain BPM estimates.
-- Uses a pretrained CLAP model to rank ten music descriptions and sample eight sections across a song. These are relative matches, not calibrated probabilities.
-- Saves analysis summaries, notes, favorites, and corrected BPM in a local H2 database. Uploaded songs are deleted from temporary storage after processing.
-- Searches saved results by filename, description, or notes; filters by BPM range, top description, and favorites. BPM filtering uses a saved correction when available. Filters apply instantly to summaries already loaded in the browser.
+- Shows a clickable, draggable full-song waveform instead of a browser audio progress slider. Arrow keys seek five seconds when the waveform has focus.
+- Estimates BPM, energy, brightness, and zero-crossing rate. Tap tempo and half/double-time comparisons help interpret uncertain BPM estimates.
+- Automatically uses a pretrained CLAP model after an upload to rank ten music descriptions from a short excerpt. The first run downloads model weights and can take a while. If analysis fails, the feeling panel offers a retry.
+- Samples eight sections across the song when you select **Analyze Full-Song Timeline**.
+- Saves analysis summaries, listening notes, favorites, and corrected BPM in a local H2 database. Uploaded audio is deleted from temporary storage after processing.
+- Searches saved results by filename, description, or notes, and filters by BPM, top description, or favorites.
+
+These feeling scores are relative audio-text matches, **not calibrated probabilities** and not a measure of a listener's emotions. The automatic BPM may reflect a half-time or double-time feel. Uploaded files must be MP3 or WAV, at most 100 MB and 10 minutes.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    React["React interface"] --> Spring["Spring Boot API"]
-    Spring --> H2["H2 saved library"]
-    Spring --> Python["Python audio analyzer"]
+    React["React upload, player and saved library"] --> Spring["Spring Boot API"]
+    Spring --> H2["H2 saved results"]
+    Spring --> Python["FastAPI audio analysis"]
 ```
 
-- **React** owns the player, waveform, tap tempo, and saved-library interface.
-- **Spring Boot** validates incoming uploads, exposes the public REST API, streams the audio bytes to the analyzer, and persists analysis summaries and user corrections with JPA.
-- The local Java-to-Python upload uses HTTP/1.1 explicitly. Java's default h2c upgrade caused Uvicorn to reject the upload with `Invalid HTTP request received` before Python could inspect the audio.
-- **Python** owns music feature extraction and model inference. It converts uploads to temporary PCM WAV using a bundled FFmpeg binary. Java writes each upload to a temporary file while forwarding it; both services delete their temporary files after the response. The database stores no audio. The sampled timeline is returned to the browser but is not persisted.
+Spring validates and forwards uploaded files to Python over local HTTP/1.1. Python decodes temporary PCM WAV files with FFmpeg and extracts audio features with librosa; CLAP ranks music descriptions. The server stores analysis summaries, not uploaded audio or full waveforms. The sampled timeline is returned to the browser without being stored.
 
-The split is intentional: Java demonstrates REST and persistence, while Python keeps the existing librosa and CLAP code instead of rewriting audio analysis in a language that lacks those dependencies.
+## Update your existing Mac project
+
+If your current project is in `~/Downloads/music-description-studio-8`, extract this complete ZIP in Downloads and run from its extracted folder:
+
+```bash
+cd ~/Downloads/music-description-studio-local-analysis
+bash update-current-mac.sh
+```
+
+The updater replaces the changed frontend and Java settings, deletes obsolete integration source files and Maven build output, then rebuilds and restarts this project's services. It **preserves** your `backend/.venv`, `frontend/node_modules`, and `server/music-library.mv.db` saved results. If your existing project is in a different folder, pass that folder's full path as an argument:
+
+```bash
+bash update-current-mac.sh /path/to/your/existing-project
+```
+
+The previous `server/.env`, if present, is left untouched but is **no longer loaded** by the startup script. You can remove it yourself if it contains only settings you no longer use. Extracting a newer ZIP over an older folder without running the updater will leave old Java source files in place and may break the Spring build.
 
 ## Requirements
 
-- Java 17 or newer and Maven 3.6.3 or newer
+- macOS with Java 17 or newer and Maven 3.6.3 or newer
 - Python 3.12 or 3.13
 - Node.js and npm
-- Enough disk space for the Python dependencies (including bundled FFmpeg) and the CLAP model downloaded on first description request
+- Disk space for Python packages and the CLAP weights downloaded on first analysis
 
 ## Run locally
 
-### Mac: one command after setup
-
-If you have already installed the Python and frontend dependencies, run this
-from the project root:
+After installing dependencies, run from the project root:
 
 ```bash
 bash start-mac.sh
 ```
 
-This restarts this project's existing services, waits for ports 8000, 8080,
-and 5173, and prints the recent error logs if a service fails. It leaves other
-projects' processes alone. It installs the bundled audio decoder if it is
-missing from this project's Python environment. The three logs are in
-`run-logs/`. Run `bash stop-mac.sh` when finished.
-Keep the existing `server/music-library.mv.db` if you have saved tracks.
+Open <http://127.0.0.1:5173>. The script starts and checks Python on port 8000, Spring Boot on 8080, and React/Vite on 5173. Logs are written to `run-logs/`. To stop them, run `bash stop-mac.sh` from this project. The scripts leave services from other project folders alone.
 
-### First-time setup or manual run
+### First-time setup
 
-Open three terminals, from this project's root directory:
-
-**1. Python analyzer**
+Install Python and frontend dependencies once from the project root:
 
 ```bash
 cd backend
-python3 -m venv .venv  # use Python 3.12 or 3.13
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m uvicorn main:app --host 127.0.0.1 --port 8000
-```
-
-**2. Java API**
-
-```bash
-cd server
-mvn spring-boot:run
-```
-
-**3. React client**
-
-```bash
-cd frontend
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cd ../frontend
 npm ci
-npm run dev
+cd ..
+bash start-mac.sh
 ```
 
-To run the saved-library filter checks, run `npm test` from `frontend`.
+You can also run the components separately in three terminals: `backend/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000` from `backend`; `mvn spring-boot:run` from `server`; `npm run dev` from `frontend`. Keep each terminal open. If a service fails, read its log under `run-logs/`. `start-mac.sh` installs the bundled audio decoder in the project's Python environment if it is missing.
 
-Open <http://127.0.0.1:5173>. The Java service listens on 127.0.0.1:8080. Set `ANALYZER_URL` before starting Java if Python uses a different address. Set `VITE_API_BASE` for the frontend if Java uses a different address.
-
-For later manual runs, you do not need to reinstall dependencies. In three separate terminals,
-run `source .venv/bin/activate && python -m uvicorn main:app --host 127.0.0.1 --port 8000`
-from `backend`, `mvn spring-boot:run` from `server`, and `npm run dev` from
-`frontend`. Keep all three terminals open. Closing one stops its service.
-If port 8000 is already in use, Python is likely still running in another terminal;
-check <http://127.0.0.1:8000/api/health> before starting another copy.
-
-The H2 database is created at `server/music-library.mv.db` and survives server restarts. It stores filenames, numeric features, the top description label, notes, favorites, and BPM corrections. It does **not** store the song or its full waveform.
+The H2 database file is `server/music-library.mv.db`. Keep it when updating if you want your saved results. For nondefault local addresses, set `ANALYZER_URL` before starting Spring or `VITE_API_BASE` before starting Vite.
 
 ## Main API routes
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/tracks/analyze` | Upload MP3/WAV; return waveform/features; save summary |
-| `GET /api/tracks` | List saved summaries, newest first |
+| `POST /api/tracks/analyze` | Upload audio, return waveform and features, save summary |
+| `GET /api/tracks` | List saved summaries |
 | `PATCH /api/tracks/{id}` | Save notes, BPM correction, or favorite |
-| `POST /api/tracks/{id}/description` | Forward audio to CLAP; save top label |
-| `POST /api/tracks/{id}/timeline` | Return sampled description timeline |
-| `DELETE /api/tracks/{id}` | Remove saved summary |
+| `POST /api/tracks/{id}/description` | Rank descriptions with CLAP and save the top match |
+| `POST /api/tracks/{id}/timeline` | Return an eight-section sampled timeline |
+| `DELETE /api/tracks/{id}` | Delete a saved summary |
 
-The upload field is named `audio`. MP3 and WAV are accepted up to 100 MB and 10 minutes. The CLAP scores are relative text-audio similarities, **not** calibrated probabilities. Beat tracking has half/double-time ambiguity; tap tempo and a saved correction let the listener make the final call.
+The multipart upload field is `audio`. Spring forwards the validated file to Python as raw audio bytes with the extension in a header. Java uses HTTP/1.1 explicitly because a default h2c upgrade caused Uvicorn to reject uploads in this local setup.
 
-If the upload fails, the response includes the Python analyzer's error details. The browser sends multipart data to Spring; Spring forwards the validated file as raw audio bytes to Python so the second hop does not depend on another multipart parser.
+## Verification and limits
 
-## Walkthrough you can use in an interview
-
-1. In `frontend/src/main.jsx`, selecting a file calls the Spring `/api/tracks/analyze` endpoint. The response draws the waveform and metrics.
-2. `TrackController` maps that request to `TrackService`. The service checks the file and calls `AnalyzerClient`.
-3. `AnalyzerClient` streams the validated audio to Python `/api/analyze-raw`, with the file extension in an HTTP header.
-4. Python calculates the features and waveform. Java saves only the summary through `TrackRepository`, which is a Spring Data JPA repository backed by H2.
-5. The library screen uses `GET /api/tracks` and `PATCH /api/tracks/{id}` to show history and save your notes, favorite, or corrected BPM. It searches the fetched summaries by text, BPM range, top description, and favorites.
-
-## Verification and current limits
-
-The full local flow was verified on macOS with an MP3: upload, BPM and audio features, waveform, CLAP description, sampled timeline, and a saved library result. Request-level checks also sent an MP3 and a 41 MB WAV from Java's HTTP client to Uvicorn successfully; an invalid audio upload returned a clear 400 error.
-
-The app is local-only. Spotify/Apple Music integration and spectrogram views shown as planned in the UI are not implemented. The description model is experimental, and automated BPM can be ambiguous; human listening and a saved correction are supported. Notes surviving a Java restart have not yet been independently checked.
-
+A full local MP3 upload was verified on macOS: playback, waveform seeking, features, CLAP feeling match, sampled timeline, and saved library result. The model describes a sampled excerpt; its labels may not reflect the whole song. The timeline samples eight excerpts rather than continuously classifying every moment. This app runs locally and does not provide hosted accounts. To run the saved-library filter checks, use `npm test` in `frontend`.

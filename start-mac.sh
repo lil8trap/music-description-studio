@@ -7,6 +7,12 @@ log_dir="$project_dir/run-logs"
 mkdir -p "$log_dir"
 
 fail() { printf 'Music Studio: %s\n' "$1" >&2; exit 1; }
+for old_source in "$project_dir/server/src/main/java/dev/nathaniel/music/SoundCloudService.java" \
+                  "$project_dir/server/src/main/java/dev/nathaniel/music/SoundCloudController.java" \
+                  "$project_dir/server/src/main/java/dev/nathaniel/music/SpotifyService.java" \
+                  "$project_dir/server/src/main/java/dev/nathaniel/music/SpotifyController.java"; do
+    [ ! -f "$old_source" ] || fail "Old streaming integration source remains ($old_source). Run update-current-mac.sh from the new package."
+done
 for tool in lsof curl mvn npm; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is missing. See README.md for setup."
 done

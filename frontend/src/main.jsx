@@ -1,7 +1,8 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Activity, AudioLines, BarChart3, Brain, Clock3, FileAudio, Info, Music2, Play, RotateCcw, Search, Sparkles, UploadCloud, Zap} from 'lucide-react';
+import {Activity, AudioLines, BarChart3, Brain, FileAudio, Info, Music2, Play, RotateCcw, Search, UploadCloud} from 'lucide-react';
 import {filterSavedTracks} from './libraryFilters.js';
+import WaveformPlayer from './WaveformPlayer.jsx';
 import './style.css';
 
 const labels = ["Energetic", "Euphoric", "Dreamy", "Aggressive", "Chaotic", "Melancholic", "Peaceful", "Tense", "Mysterious", "Playful"];
@@ -14,7 +15,7 @@ async function readResponse(response) {
 }
 
 function App() {
-  const [file,setFile] = useState(null), [url,setUrl] = useState(''), [result,setResult] = useState(null), [mood,setMood] = useState(null), [moodError,setMoodError] = useState(''), [moodLoading,setMoodLoading] = useState(false), [error,setError] = useState(''), [loading,setLoading] = useState(false), [tab,setTab] = useState('Waveform'), [timeline,setTimeline] = useState(null), [timelineLoading,setTimelineLoading] = useState(false), [timelineError,setTimelineError] = useState('');
+  const [file,setFile] = useState(null), [url,setUrl] = useState(''), [result,setResult] = useState(null), [mood,setMood] = useState(null), [moodError,setMoodError] = useState(''), [moodLoading,setMoodLoading] = useState(false), [error,setError] = useState(''), [loading,setLoading] = useState(false), [timeline,setTimeline] = useState(null), [timelineLoading,setTimelineLoading] = useState(false), [timelineError,setTimelineError] = useState('');
   const [tapTimes,setTapTimes] = useState([]);
   const [savedTracks,setSavedTracks] = useState([]), [libraryError,setLibraryError] = useState('');
   const [librarySearch,setLibrarySearch] = useState(''), [minBpm,setMinBpm] = useState(''), [maxBpm,setMaxBpm] = useState('');
@@ -70,9 +71,21 @@ function App() {
     if(!/\.(mp3|wav)$/i.test(f.name)){setError('Choose an MP3 or WAV file.');return;}
     if(f.size>100*1024*1024){setError('File must be 100 MB or smaller.');return;}
     selectionRef.current += 1;
-    setTapTimes([]);setError('');setResult(null);setMood(null);setMoodError('');setTimeline(null);setTimelineError('');setActiveId(null);setDraftNotes('');setManualBpm('');setFavorite(false);setFile(f);
+    setTapTimes([]);setError('');setResult(null);setMood(null);setMoodError('');setMoodLoading(false);setTimeline(null);setTimelineError('');setActiveId(null);setDraftNotes('');setManualBpm('');setFavorite(false);setFile(f);
   }
-  function clear(){setTapTimes([]);selectionRef.current+=1;setFile(null);setResult(null);setMood(null);setMoodError('');setTimeline(null);setTimelineError('');setError('');setLoading(false);setActiveId(null);setDraftNotes('');setManualBpm('');setFavorite(false);if(fileInput.current)fileInput.current.value='';}
+  function clear(){setTapTimes([]);selectionRef.current+=1;setFile(null);setResult(null);setMood(null);setMoodError('');setMoodLoading(false);setTimeline(null);setTimelineError('');setError('');setLoading(false);setActiveId(null);setDraftNotes('');setManualBpm('');setFavorite(false);if(fileInput.current)fileInput.current.value='';}
+  async function analyzeFeeling(audioFile, trackId, requestId, signal) {
+    setMoodLoading(true);setMoodError('');setMood(null);
+    try {
+      const fd=new FormData();fd.append('audio',audioFile);
+      const response=await fetch(`${API_BASE}/api/tracks/${trackId}/description`,{method:'POST',body:fd,signal});
+      const data=await readResponse(response);
+      if(selectionRef.current===requestId){setMood(data);loadLibrary();}
+    }catch(e){
+      if(e.name!=='AbortError'&&selectionRef.current===requestId)
+        setMoodError(String(e.message).includes('fetch')?'Cannot reach the Spring Boot service on port 8080.':e.message);
+    }finally{if(selectionRef.current===requestId)setMoodLoading(false);}
+  }
   // Automatically fetch features and the full-song waveform after selecting a file.
   useEffect(()=>{
     if(!file)return;
@@ -84,7 +97,11 @@ function App() {
         const fd=new FormData();fd.append('audio',file);
         const response=await fetch(`${API_BASE}/api/tracks/analyze`,{method:'POST',body:fd,signal:controller.signal});
         const data=await readResponse(response);
-        if(selectionRef.current===requestId){setResult(data);setActiveId(data.id);loadLibrary();}
+        if(selectionRef.current===requestId){
+          setResult(data);setActiveId(data.id);loadLibrary();
+          // Analyze the uploaded file's feeling without another button click.
+          void analyzeFeeling(file,data.id,requestId,controller.signal);
+        }
       }catch(e){
         if(e.name!=='AbortError'&&selectionRef.current===requestId)
           setError(String(e.message).includes('fetch')?'Cannot reach the Spring Boot service on port 8080.':e.message);
@@ -96,7 +113,7 @@ function App() {
   async function analyze(){
     if(!file){setError('Upload a song first.');return;}
     // Re-select the current file to re-run the waveform and feature analysis.
-    selectionRef.current+=1;setResult(null);setActiveId(null);setFile(null);
+    selectionRef.current+=1;setResult(null);setMood(null);setMoodError('');setMoodLoading(false);setActiveId(null);setFile(null);
     setTimeout(()=>setFile(file),0);
   }
   async function analyzeTimeline(){
@@ -111,17 +128,9 @@ function App() {
     }catch(e){if(selectionRef.current===requestId)setTimelineError(String(e.message).includes('fetch')?'Cannot reach the Spring Boot service on port 8080.':e.message);}
     finally{setTimelineLoading(false)}
   }
-  async function detectMood(){
+  function detectMood(){
     if(!file||!activeId){setMoodError('Upload and analyze a song first.');return;}
-    const requestId=selectionRef.current;
-    setMoodLoading(true);setMoodError('');setMood(null);
-    try{
-      const fd=new FormData();fd.append('audio',file);
-      const response=await fetch(`${API_BASE}/api/tracks/${activeId}/description`,{method:'POST',body:fd});
-      const data=await readResponse(response);
-      if(selectionRef.current===requestId){setMood(data);loadLibrary();}
-    }catch(e){if(selectionRef.current===requestId)setMoodError(String(e.message).includes('fetch')?'Cannot reach the Spring Boot service on port 8080.':e.message)}
-    finally{setMoodLoading(false)}
+    void analyzeFeeling(file,activeId,selectionRef.current);
   }
   async function saveReview(changes) {
     if(!activeId)return;
@@ -168,24 +177,30 @@ function App() {
     {icon:'◷',name:'Duration (seconds)',value:result?.duration??'--',color:'purple'},
     {icon:'♬',name:'Analyzed length',value:result?.analyzed_length?`${result.analyzed_length}s`:'--',color:'green'},
   ];
-  const pts=result?.waveform?.map((v,i)=>`${i/(result.waveform.length-1)*100},${50-v*44}`).join(' ')||'';
   return <div className="app">
     <header><div className="brand"><Music2 size={42}/><div><h1>Music Description AI</h1><p>Upload a song, play it, and discover its musical character.</p></div></div><span className="about"><Info size={15}/> Music analysis lab</span></header>
-    <div className="pills"><span><FileAudio/> MP3 / WAV Support</span><span><BarChart3/> Audio Feature Analysis</span><span><Brain/> Experimental Music Descriptions</span><span><Clock3/> Spotify & Apple Music (Planned)</span></div>
+    <div className="pills"><span><FileAudio/> MP3 / WAV Support</span><span><BarChart3/> Audio Feature Analysis</span><span><Brain/> Experimental Music Descriptions</span></div>
     <main className="columns">
       <section className="left">
-        <div className="panel"><h2><UploadCloud/> 1. Upload a Song</h2><div className="drop" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();selectFile(e.dataTransfer.files[0])}}><UploadCloud size={42}/><p>{file?file.name:'Drag and drop an MP3 or WAV file here'}</p><span>– or –</span><button className="primary browse" onClick={()=>fileInput.current?.click()}>Browse Files</button><input ref={fileInput} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" hidden onChange={e=>selectFile(e.target.files?.[0])}/><small>Maximum file size: 100 MB · Maximum length: 10 minutes</small></div></div>
-        <div className="panel"><h2><Play/> 2. Player & Analysis</h2><div className="player">{url?<audio src={url} controls preload="metadata"/>:<p>Upload a song to enable playback</p>}</div><div className="actions"><button className="primary" disabled={loading} onClick={analyze}><AudioLines size={17}/>{loading?'Analyzing…':'Analyze Again'}</button><button className="secondary" onClick={clear}><RotateCcw size={17}/> Clear</button></div><small className="muted">Analyze Again creates a new saved result.</small>{error&&<p className="error" role="alert">{error}</p>}</div>
+        <div className="panel upload-panel"><h2><UploadCloud/> 1. Upload a Song</h2>
+          <div className="drop" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();selectFile(e.dataTransfer.files[0])}}>
+            <UploadCloud size={42}/><p>{file?file.name:'Drag and drop an MP3 or WAV file here'}</p><span>– or –</span>
+            <button className="primary browse" onClick={()=>fileInput.current?.click()}>Browse Files</button>
+            <input ref={fileInput} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" hidden onChange={e=>selectFile(e.target.files?.[0])}/>
+            <small>Maximum file size: 100 MB · Maximum length: 10 minutes</small>
+          </div>
+        </div>
+        <div className="panel"><h2><Play/> 2. Uploaded Song Player</h2><div className="player">{url?<WaveformPlayer src={url} waveform={result?.waveform}/>:<p>Upload a song to see its waveform and play it here.</p>}</div><div className="actions"><button className="primary" disabled={loading||!file} onClick={analyze}><AudioLines size={17}/>{loading?'Analyzing…':'Analyze Again'}</button><button className="secondary" onClick={clear}><RotateCcw size={17}/> Clear</button></div><small className="muted">Analyze Again creates a new saved result from the uploaded file.</small>{error&&<p className="error" role="alert">{error}</p>}</div>
       </section>
       <section className="right">
-        <div className="panel"><h2><Brain/> Music Description Match <span className="coming">Experimental</span></h2>
+        <div className="panel"><h2><Brain/> Music Feeling Match <span className="coming">Experimental</span></h2>
           <div className="emotion-body"><div className="circle">{mood?.description?({'Energetic':'⚡','Euphoric':'🌈','Dreamy':'🌌','Aggressive':'🔥','Chaotic':'🌀','Melancholic':'🌧️','Peaceful':'🕊️','Tense':'😬','Mysterious':'🔮','Playful':'🎉'}[mood.description]):'?'}</div><div className="emotion-list">
-            <div className="notice">{mood?.description?`Top description: ${mood.description}. Analyzed ${mood.analysis_length_seconds}s from ${mood.analysis_start_seconds}s.`:'Analyze the music itself using a pretrained CLAP audio model. First run downloads model weights.'}</div>
+            <div className="notice" aria-live="polite">{mood?.description?`Top feeling: ${mood.description}. Analyzed ${mood.analysis_length_seconds}s from ${mood.analysis_start_seconds}s.`:moodLoading?'Listening to the uploaded file… The first run downloads the CLAP model and can take a while.':loading?'Preparing the uploaded audio and waveform…':'Upload an MP3 or WAV to estimate its musical feeling automatically.'}</div>
             {labels.map(l=><div className="meter" key={l}><span>{l}</span><div className="track"><div className="meter-fill" style={{width:`${Math.max(0,Math.min(100,(mood?.scores?.[l]??0)*100))}%`}} /></div><span>{mood?`${Math.round((mood.scores?.[l]??0)*100)}%`:'—'}</span></div>)}
           </div></div>
-          <button className="primary mood-button" disabled={!activeId||moodLoading} onClick={detectMood}><Brain size={17}/>{moodLoading?'Analyzing the music… (first download can take a while)':'Describe This Music'}</button>
+          <button className="primary mood-button" disabled={!activeId||moodLoading} onClick={detectMood}><Brain size={17}/>{moodLoading?'Analyzing feelings…':mood?'Analyze Feelings Again':'Try Feelings Analysis'}</button>
           {moodError&&<p className="error" role="alert">{moodError}</p>}
-          <p className="mood-warning">Scores show relative similarity to ten descriptions, not calibrated probabilities. The descriptions are experimental and may not fully capture the music.</p>
+          <p className="mood-warning">These relative scores come from an excerpt of your uploaded file. They are experimental matches, not calibrated probabilities or a reading of a listener’s feelings.</p>
         </div>
         <div className="panel"><h2><BarChart3/> Audio Features</h2><div className="metrics">{metrics.map(m=><div className={'metric '+m.color} key={m.name}><span className="metric-icon">{m.icon}</span><div><small>{m.name}</small><strong>{m.value}</strong></div></div>)}</div>
           <div className="tempo-box">
@@ -203,7 +218,6 @@ function App() {
         </div>
       </section>
     </main>
-    <section className="panel visual"><div className="visual-head"><h2><Activity/> Waveform & Analysis</h2><div className="tabs">{['Waveform','Spectrogram','Mel-Spectrogram'].map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</div></div>{tab==='Waveform'&&result?.waveform?<div className="wave"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="0" y1="50" x2="100" y2="50" stroke="#3b4977" strokeWidth=".3"/><polyline points={pts} fill="none" stroke="#b469ff" strokeWidth=".45" vectorEffect="non-scaling-stroke"/></svg><small>Full song ({result.waveform_duration}s) · peak amplitude envelope</small></div>:<div className="empty"><Activity size={25}/><p>{tab==='Waveform'?'Upload a song to display its waveform automatically.':`${tab} visualization is planned for a later release.`}</p></div>}</section>
     <section className="panel timeline-panel">
       <div className="timeline-head"><div><h2><Activity/> Music Description Timeline</h2><p>See how your track's character changes across eight sampled excerpts.</p></div><button className="primary" disabled={!activeId||timelineLoading} onClick={analyzeTimeline}>{timelineLoading?'Describing sections… (CPU analysis can be slow)':'Analyze Full-Song Timeline'}</button></div>
       {timelineError&&<p className="error" role="alert">{timelineError}</p>}
@@ -236,7 +250,7 @@ function App() {
       {savedTracks.length>0&&filtersActive&&!libraryError&&<p className="library-filter-hint">{invalidBpmRange?'Minimum BPM must be less than or equal to maximum BPM.':visibleTracks.length===0?'No matches. Try a different description or BPM range.':'BPM uses your correction when one is saved. Description filters use the top saved match.'}</p>}
       {!savedTracks.length&&!libraryError&&<p className="timeline-empty">Upload a song to save your first analysis. Audio files themselves are not stored.</p>}
     </section>
-    <footer>Experimental music description matching and audio features · Streaming integrations are not implemented.</footer>
+    <footer>Experimental music description matching and audio features for uploaded files.</footer>
   </div>
 }
 
